@@ -1,7 +1,10 @@
-/* Meus Plantões: guarda uma cópia do APP (as telas) no aparelho, para ele abrir mesmo sem internet.
+/* Meus Plantões (TESTE): guarda uma cópia do APP (as telas) no aparelho, para ele abrir mesmo sem internet.
    Os DADOS não passam por aqui: eles ficam no banco do navegador e na nuvem (Supabase).
-   Ao mudar a lista de arquivos, troque o número da versão em CACHE. */
-const CACHE = "meus-plantoes-v1";
+   Ao mudar a lista de arquivos, troque o número da versão em CACHE.
+   O app de teste e o app real ficam no mesmo site (honorio68.github.io): cada um só mexe nas cópias
+   com o próprio começo de nome (PREFIXO), para um nunca apagar a cópia do outro. */
+const PREFIXO = "meus-plantoes-teste-";
+const CACHE = PREFIXO + "v2";
 const ARQUIVOS = [
   "./", "index.html", "manifest.webmanifest",
   "icone-192.png", "icone-512.png", "icone-maskable-192.png", "icone-maskable-512.png",
@@ -12,10 +15,10 @@ const ARQUIVOS = [
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
 });
-// versão nova: apaga as cópias antigas
+// versão nova: apaga só as cópias antigas DESTE app (e a da primeira versão, que tinha outro nome)
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys()
-    .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    .then(ks => Promise.all(ks.filter(k => k !== CACHE && (k.startsWith(PREFIXO) || k === "meus-plantoes-v1")).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -36,7 +39,7 @@ self.addEventListener("fetch", e => {
   if (r.mode === "navigate" || u.origin === self.location.origin) {
     e.respondWith(
       fetch(r).then(resp => guardar(r, resp))
-        .catch(() => caches.match(r, { ignoreSearch: true }).then(x => x || caches.match("index.html")))
+        .catch(() => caches.match(r, { ignoreSearch: true, cacheName: CACHE }).then(x => x || caches.match("index.html", { cacheName: CACHE })))
     );
     return;
   }

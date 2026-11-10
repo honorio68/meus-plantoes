@@ -811,6 +811,7 @@ input[type=email],input[type=password]{background:var(--surface);border:1px soli
         <input type="file" id="bkFile" accept=".json,application/json" hidden>
       </div>
       <div id="bkConfirm"></div>
+      <div id="bkConferencia" style="display:grid;gap:10px"></div>
     </div>
   </section>
 
@@ -1781,7 +1782,7 @@ function diasDesde(iso){return Math.floor((Date.now()-new Date(iso).getTime())/8
 function renderBackup(){
   const u=S.meta.ultimoBackup,p=S.importPend;
   $("#bkInfo").innerHTML=u?`Último backup: <b>${brDataHora(u)}</b>`:`<b>Você ainda não fez nenhum backup.</b>`;
-  $("#bkConfirm").innerHTML=p?`<div class="confirm"><span>Isto vai <b>apagar</b> o que está no app agora (<b>${p.atuais.a}</b> atendimentos do PS e <b>${p.atuais.c}</b> do consultório) e colocar no lugar o backup de <b>${esc(p.quando)}</b> (<b>${p.dados.atendimentos.length}</b> do PS e <b>${p.dados.consultorio.length}</b> do consultório). Continuar?</span>
+  $("#bkConfirm").innerHTML=p?`<div class="confirm"><span>Isto vai <b>apagar</b> o que está no app agora${S.nuvem?.estado==="ok"?" e na nuvem (no celular também)":""} (<b>${p.atuais.a}</b> atendimentos do PS e <b>${p.atuais.c}</b> do consultório) e colocar no lugar o backup de <b>${esc(p.quando)}</b> (<b>${p.dados.atendimentos.length}</b> do PS e <b>${p.dados.consultorio.length}</b> do consultório). Continuar?</span>
     <button class="btn small danger" data-a="yes">Sim, importar</button><button class="btn small ghost" data-a="no">Cancelar</button></div>`:"";
 }
 // aviso no topo: primeiro lembra de configurar os valores, depois lembra do backup
@@ -1826,9 +1827,50 @@ $("#bkConfirm").addEventListener("click",async e=>{
   try{
     await aplicarImport(dados);
     toast(`Backup importado: ${dados.atendimentos.length} do PS e ${dados.consultorio.length} do consultório`);
-  }catch{toast("Não foi possível importar. Nada foi alterado.")}
+  }catch{toast("Não foi possível importar. Nada foi alterado.");renderBackup();return}
   renderBackup();
+  if(S.nuvem.estado==="ok")await conferirNuvem(dados); // envia para a nuvem e confere ficha por ficha
 });
+/* ---------- CONFERÊNCIA: o que está na nuvem é igual ao arquivo importado? ----------
+   Depois de importar, espera tudo ir para a nuvem, baixa de volta e compara cada ficha com o arquivo
+   (campo por campo) e os totais de cada mês (centavo por centavo). Não muda nada: só confere. */
+async function conferirNuvem(dados){
+  const el=$("#bkConferencia");
+  el.innerHTML=`<div class="notice">Enviando para a nuvem e conferindo… não feche o app.</div>`;
+  try{
+    for(let i=0;i<40&&qtdFila();i++){await nuvemEnviar();if(qtdFila())await new Promise(r=>setTimeout(r,1500))}
+    if(qtdFila())throw new Error(`ainda faltam ${qtdFila()} fichas para enviar (sem internet?)`);
+    const linhas=await nuvemLer("loja,chave,dados",q=>q.eq("apagado",false));
+    const nuvem=new Map(linhas.map(l=>[filaChave(l.loja,l.chave),l.dados]));
+    // 1) ficha por ficha
+    let iguais=0,total=0;const dif=[];
+    for(const lj of Object.keys(CHAVE_LOJA))for(const x of dados[lj]){
+      total++;const k=filaChave(lj,x[CHAVE_LOJA[lj]]);
+      if(nuvem.has(k)&&estavel(nuvem.get(k))===estavel(x))iguais++;else dif.push(k);
+      nuvem.delete(k);
+    }
+    // a configuração pode ganhar campos novos do app (ex.: Documentos): confere só os campos que vieram no arquivo
+    const cfgN=nuvem.get("config|main")||{};nuvem.delete("config|main");
+    const cfgDif=Object.keys(dados.config).filter(k=>estavel(dados.config[k])!==estavel(cfgN[k]));
+    const sobra=[...nuvem.keys()]; // fichas na nuvem que não estão no arquivo
+    // 2) totais de cada mês: o que o arquivo diz × o que a nuvem tem
+    const somar=(atts,cons)=>{const m={};
+      const mes=s=>m[s.slice(0,7)]||(m[s.slice(0,7)]={n:0,total:0,meu:0,nc:0,con:0});
+      atts.forEach(a=>{const x=mes(a.data);x.n++;x.total=r2(x.total+(a.total||0));x.meu=r2(x.meu+meuDe(a))});
+      cons.forEach(c=>{const x=mes(c.data);x.nc++;x.con=r2(x.con+conPago(c))});return m};
+    const doArq=somar(dados.atendimentos,dados.consultorio);
+    const daNuvem=somar(linhas.filter(l=>l.loja==="atendimentos").map(l=>l.dados),linhas.filter(l=>l.loja==="consultorio").map(l=>l.dados));
+    const meses=[...new Set([...Object.keys(doArq),...Object.keys(daNuvem)])].sort();
+    const vazio={n:0,total:0,meu:0,nc:0,con:0};
+    const linhaMes=m=>{const a=doArq[m]||vazio,b=daNuvem[m]||vazio,ok=estavel(a)===estavel(b);
+      return {ok,html:`<tr><td>${esc(monthLabel(m))}</td><td class="r">${a.n}</td><td class="r">${brl(a.meu)}</td><td class="r">${a.nc}</td><td class="r">${brl(a.con)}</td><td>${ok?`<span class="badge ok">igual</span>`:`<span class="badge pend">diferente</span>`}</td></tr>`}};
+    const ls=meses.map(linhaMes),tudoOk=!dif.length&&!cfgDif.length&&!sobra.length&&ls.every(l=>l.ok);
+    el.innerHTML=`<div class="notice${tudoOk?"":" warn"}">${tudoOk
+        ?`<b>✓ Conferido: tudo igual.</b> As ${total} fichas do arquivo estão na nuvem, campo por campo, e os totais de todos os meses batem centavo por centavo.`
+        :`<b>Atenção: encontrei diferenças.</b> ${iguais} de ${total} fichas iguais.${dif.length?` Diferentes ou faltando: ${esc(dif.slice(0,8).join(", "))}${dif.length>8?"…":""}.`:""}${cfgDif.length?` Configuração diferente em: ${esc(cfgDif.join(", "))}.`:""}${sobra.length?` A nuvem tem ${sobra.length} fichas a mais.`:""} Não use o app novo ainda e me mande um print.`}</div>
+      <div class="tbl"><table><thead><tr><th>Mês</th><th class="r">Atend. PS</th><th class="r">Sua parte</th><th class="r">Consultório</th><th class="r">Entrou</th><th>Nuvem</th></tr></thead><tbody>${ls.map(l=>l.html).join("")}</tbody></table></div>`;
+  }catch(err){el.innerHTML=`<div class="notice warn"><b>Não consegui conferir:</b> ${esc(err?.message||String(err))}. Confira a internet e importe de novo.</div>`}
+}
 // tudo o que está no app, no formato de backup (o mesmo do arquivo automático)
 async function dadosDoApp(){
   const d=await lerTudo();
