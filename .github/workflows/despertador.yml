@@ -1,0 +1,43 @@
+# Despertador do Meus Plantões
+# - Todo dia: chama o banco do Supabase uma vez, para o plano grátis não "dormir" (ele pausa após 7 dias sem uso).
+#   A chamada só pergunta a hora do servidor: não lê nenhum dado de paciente.
+# - Dia 1 de cada mês: grava a data no arquivo despertador.txt, porque o GitHub desliga tarefas
+#   agendadas de repositórios que ficam 60 dias sem nenhuma mudança.
+# - Se falhar, o GitHub manda um e-mail para você.
+name: Despertador
+
+on:
+  schedule:
+    - cron: "17 9 * * *"   # todo dia às 9h17 UTC (6h17 em Brasília)
+  workflow_dispatch:        # cria o botão "Run workflow", para rodar na hora
+
+permissions:
+  contents: write           # deixa gravar o despertador.txt
+
+jobs:
+  acordar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acordar o banco de TESTE
+        run: |
+          code=$(curl -s -o resposta.txt -w "%{http_code}" -X POST \
+            "https://hgrrerugvdawotqfkzle.supabase.co/rest/v1/rpc/despertar" \
+            -H "apikey: sb_publishable_PrJPlzvaNqEmnQY3SagVIQ_I4KowHKz" \
+            -H "Content-Type: application/json" -d "{}")
+          echo "Banco de TESTE respondeu $code: $(cat resposta.txt)"
+          test "$code" = "200"
+
+      - uses: actions/checkout@v5
+
+      - name: Guardar a data (dia 1 de cada mês, ou quando rodar pelo botão)
+        run: |
+          if [ "$(date -u +%d)" = "01" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            date -u +"%Y-%m-%d %H:%M UTC" > despertador.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add despertador.txt
+            git commit -m "Despertador: $(date -u +%Y-%m-%d)"
+            git push
+          else
+            echo "Hoje não precisa gravar a data."
+          fi
