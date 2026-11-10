@@ -27,6 +27,15 @@ jobs:
           echo "Banco de TESTE respondeu $code: $(cat resposta.txt)"
           test "$code" = "200"
 
+      - name: Acordar o banco REAL
+        run: |
+          code=$(curl -s -o resposta.txt -w "%{http_code}" -X POST \
+            "https://sbssuhlagjecgbjuxsdr.supabase.co/rest/v1/rpc/despertar" \
+            -H "apikey: sb_publishable_kIuqTMPGSWIEH2eyPckP0Q_Ouh38rFq" \
+            -H "Content-Type: application/json" -d "{}")
+          echo "Banco REAL respondeu $code: $(cat resposta.txt)"
+          test "$code" = "200"
+
       - uses: actions/checkout@v5
 
       - name: Guardar a data (dia 1 de cada mês, ou quando rodar pelo botão)
