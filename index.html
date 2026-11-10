@@ -1790,7 +1790,8 @@ function atualizarAviso(){
   if(!S.db)return;
   const temValores=S.cfg.planos.some(p=>p.consulta>0)||S.cfg.procedimentos.some(p=>Object.values(p.valores||{}).some(v=>v>0));
   if(!temValores){setStatus("Comece pela aba <b>Configurar</b>: cadastre seus planos e quanto recebe por consulta e procedimento.");return}
-  if(MODO_TESTE||S.auto.estado==="ok"||temArquivoAPI){setStatus("");return} // o aviso do salvamento automático aparece na barra própria
+  // com a nuvem ligada, ela já guarda tudo: não precisa lembrar de backup manual
+  if(MODO_TESTE||S.auto.estado==="ok"||temArquivoAPI||S.nuvem?.estado==="ok"){setStatus("");return} // o aviso do salvamento automático aparece na barra própria
   const u=S.meta.ultimoBackup;
   if(!u){setStatus("<b>Lembrete:</b> você ainda não fez nenhum backup. Vá em <b>Configurar → Exportar backup</b>.",true);return}
   const d=diasDesde(u);
@@ -1877,11 +1878,15 @@ async function salvarNoArquivo(){
   }catch(err){S.auto.estado=err?.name==="NotAllowedError"?"pedir":"erro"}
   renderAuto();
 }
+// SÓ NO APP DE TESTE: o arquivo precisa ter "TESTE" no nome, para nunca encostar no arquivo real do Drive
+const ARQUIVO_NOME="meus-plantoes-TESTE-dados.json";
+const arquivoPermitido=h=>/TESTE/.test(h?.name||"");
 async function escolherArquivo(){
   let h;
-  try{h=await window.showSaveFilePicker({suggestedName:"meus-plantoes-dados.json",
+  try{h=await window.showSaveFilePicker({suggestedName:ARQUIVO_NOME,
     types:[{description:"Dados do Meus Plantões",accept:{"application/json":[".json"]}}]})}
   catch{return} // a pessoa fechou a janela sem escolher
+  if(!arquivoPermitido(h)){toast("No app de teste, use um arquivo com TESTE no nome (ex.: "+ARQUIVO_NOME+")");return}
   await usarArquivo(h);
 }
 async function usarArquivo(h){
@@ -1896,7 +1901,8 @@ async function usarArquivo(h){
     S.auto.estado="ok";await aplicarImport(doArquivo);S.auto.ultimo=new Date();
     toast("Seus dados foram recuperados do arquivo");renderAuto();return;
   }
-  if(nArq&&nApp){S.auto.estado="conflito";S.auto.conflito={dados:doArquivo,nArq,nApp};renderAuto();return}
+  // com a nuvem ligada, os dados do app são os da nuvem (os mais novos): o arquivo vira só a cópia e é regravado
+  if(nArq&&nApp&&S.nuvem?.estado!=="ok"){S.auto.estado="conflito";S.auto.conflito={dados:doArquivo,nArq,nApp};renderAuto();return}
   S.auto.estado="ok";await salvarNoArquivo();
   toast("Salvamento automático ligado");
 }
@@ -1927,13 +1933,8 @@ function renderAuto(){
   const a=S.auto,bar=$("#autoBar"),nome=a.handle?.name?`<b>${esc(a.handle.name)}</b>`:"o arquivo";
   let barra="",warn=false,cfg="";
   if(!S.db){bar.hidden=true;return}
-  if(MODO_TESTE){ // SÓ NO APP DE TESTE: nunca liga o salvamento, para não encostar no arquivo real
-    bar.hidden=true;$("#autoInfo").textContent="";
-    $("#autoCfg").innerHTML=`<p style="margin:0">Desligado neste app de teste.</p>`;
-    atualizarAviso();return;
-  }
-  if(!temArquivoAPI){
-    cfg=`<p style="margin:0">Este navegador não permite salvar automaticamente num arquivo. Abra o app no <b>Microsoft Edge</b> ou no <b>Google Chrome</b>. Enquanto isso, use a cópia manual abaixo.</p>`;
+  if(!temArquivoAPI){ // celular: o navegador não deixa gravar num arquivo; quem grava a cópia no Drive é o computador
+    cfg=`<p style="margin:0">Neste aparelho não dá para gravar no Google Drive. A cópia no Drive é feita pelo <b>computador</b>: lá, no Edge, o app grava sozinho tudo o que veio da nuvem (inclusive o que você lançou aqui).</p>`;
   }else if(a.estado==="off"){
     barra=`<b>Ative o salvamento automático:</b> seus dados passam a ser gravados sozinhos num arquivo, de preferência na pasta do Google Drive. Já usava o app e limpou o navegador? Escolha o mesmo arquivo e seus dados voltam. <button class="btn small primary" data-auto="escolher">Ativar agora</button>`;
     cfg=`<p style="margin:0"><b>Desligado.</b> Clique no botão e escolha onde guardar o arquivo. Dica: escolha a pasta do <b>Google Drive</b>; assim existe uma cópia na nuvem, e o Drive ainda guarda versões antigas do arquivo.</p>
@@ -2942,7 +2943,7 @@ async function boot(){
   if(temArquivoAPI){
     try{
       const h=await pedido(loja("config").get("arquivo"));
-      if(h&&h.queryPermission){S.auto.handle=h;S.auto.estado=(await h.queryPermission({mode:"readwrite"}))==="granted"?"ok":"pedir"}
+      if(h&&h.queryPermission&&arquivoPermitido(h)){S.auto.handle=h;S.auto.estado=(await h.queryPermission({mode:"readwrite"}))==="granted"?"ok":"pedir"}
     }catch{}
   }
   renderAuto();
