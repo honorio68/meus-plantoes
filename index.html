@@ -1668,8 +1668,21 @@ $("#bRes").addEventListener("click",e=>{
 
 /* ---------- PDF (pela janela de impressão do navegador) ---------- */
 // monta o relatório numa área escondida e abre "Imprimir"; lá o Matheus escolhe "Salvar como PDF"
+// mede a folha de documento antes de imprimir, com as letras deste aparelho (o celular troca a Times New Roman
+// por outra letra, maior). Se passar de 250 mm de altura, diminui a letra aos pouquinhos até caber.
+// 250 mm cabe na folha A4 (273 mm úteis) e também na Carta (255 mm úteis).
+function caberNaFolha(){
+  const p=$("#print"),d=$("#print .dx"),mm=96/25.4,LIMITE=250;
+  p.style.cssText="display:block;position:absolute;left:-9999px;top:0;width:182mm;background:#fff"; // 182 mm = largura útil do A4 (210 − 2 × 14)
+  let fs=11.5;
+  const medir=()=>{d.style.cssText=`aspect-ratio:auto;min-height:0;padding:0;border:0;font-size:${fs}pt;line-height:1.22`;return d.getBoundingClientRect().height/mm};
+  while(medir()>LIMITE&&fs>8)fs-=.25;
+  p.style.cssText="";
+  d.style.cssText=fs<11.5?`font-size:${fs}pt`:""; // só muda a letra quando precisa
+}
 function imprimir(html,nomeArquivo){
   $("#print").innerHTML=html;
+  if($("#print .dx"))caberNaFolha(); // folha de documento: diminui a letra se o texto não couber em 1 folha
   const tituloAntes=document.title;
   document.title=nomeArquivo; // o navegador usa o título da página como nome do arquivo PDF
   const fim=()=>{document.title=tituloAntes;window.removeEventListener("afterprint",fim)};
